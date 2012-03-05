@@ -96,7 +96,6 @@ namespace opt
     static double maxGC = 1.0;
     static bool bIlluminaScaling = false;
     static std::string adapter;
-    static std::string adapterRC;
 }
 
 static const char* shortopts = "o:q:m:h:p:r:s:f:vi";
@@ -164,7 +163,7 @@ int preprocessMain(int argc, char** argv)
     if(!opt::suffix.empty())
         std::cerr << "Suffix: " << opt::suffix << "\n";
     if(opt::adapter.length())
-        std::cerr << "Adapter: " << opt::adapter << "\n";
+        std::cerr << "Adapter sequence: " << opt::adapter << "\n";
 
     // Seed the RNG
     srand(time(NULL));
@@ -447,11 +446,9 @@ bool processRead(SeqRecord& record)
       {
         std::string _tmp(record.seq.toString());
         size_t found = _tmp.find(opt::adapter);
-        if (found != std::string::npos) // Try the RC
-          found = _tmp.find(opt::adapterRC);
         if (found != std::string::npos)
         {
-          _tmp.erase(found, _tmp.length());
+          _tmp.erase(found, opt::adapter.length());
           record.seq = _tmp;
         }
       }
@@ -552,7 +549,7 @@ void parsePreprocessOptions(int argc, char** argv)
             case 'm': arg >> opt::minLength; break;
             case 'h': arg >> opt::hardClip; break;
             case 'p': arg >> opt::peMode; break;
-            case 'r': arg >> opt::adapter; reverseComplement(opt::adapter); break;
+            case 'r': arg >> opt::adapter; break;
             case 's': arg >> opt::sampleFreq; break;
             case '?': die = true; break;
             case 'v': opt::verbose++; break;
