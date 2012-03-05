@@ -49,6 +49,8 @@ static const char *PREPROCESS_USAGE_MESSAGE =
 "      -f, --quality-filter=INT         discard the read if it contains more than INT low-quality bases.\n"
 "                                       Bases with phred score <= 3 are considered low quality. Default: no filtering.\n"
 "                                       The filtering is applied after trimming so bases removed are not counted.\n"
+"      -r, --remove-adapter=STRING      Remove the adapter STRING from input reads.\n"
+"                                       Do not use this option if you are planning to use the BCR algorithm for indexing.\n"
 "      -m, --min-length=INT             discard sequences that are shorter than INT\n"
 "                                       this is most useful when used in conjunction with --quality-trim. Default: 40\n"
 "      -h, --hard-clip=INT              clip all reads to be length INT. In most cases it is better to use\n"
@@ -93,6 +95,8 @@ namespace opt
     static double minGC = 0.0f;
     static double maxGC = 1.0;
     static bool bIlluminaScaling = false;
+    static std::string adapter;
+    static std::string adapterRC;
 }
 
 static const char* shortopts = "o:q:m:h:p:s:f:vi";
@@ -108,6 +112,7 @@ static const struct option longopts[] = {
     { "hard-clip",              required_argument, NULL, 'h' },
     { "min-length",             required_argument, NULL, 'm' },
     { "sample",                 required_argument, NULL, 's' },
+    { "remove-adapter",         required_argument, NULL, 'r' },
     { "dust",                   no_argument,       NULL, OPT_DUST},
     { "dust-threshold",         required_argument, NULL, OPT_DUST_THRESHOLD },
     { "suffix",                 required_argument, NULL, OPT_SUFFIX },
@@ -142,7 +147,10 @@ int preprocessMain(int argc, char** argv)
     if(opt::qualityFilter >= 0)
         std::cerr << "QualFilter: at most " << opt::qualityFilter << " low quality bases\n";
     else
-        std::cerr << "QualFilter: no filtering\n"; 
+        std::cerr << "QualFilter: no filtering\n";
+
+    if(opt::adapter.length())
+      opt::adapterRC = reverseComplement(opt::adapter);
 
     std::cerr << "HardClip: " << opt::hardClip << "\n";
     std::cerr << "Min length: " << opt::minLength << "\n";
@@ -158,6 +166,8 @@ int preprocessMain(int argc, char** argv)
         std::cerr << "Dust threshold: " << opt::dustThreshold << "\n";
     if(!opt::suffix.empty())
         std::cerr << "Suffix: " << opt::suffix << "\n";
+    if(opt::adapter.length())
+        std::cerr << "Adapter: " << opt::adapter << "\n";
 
     // Seed the RNG
     srand(time(NULL));
@@ -219,7 +229,7 @@ int preprocessMain(int argc, char** argv)
                 // Read from separate files
                 std::string filename1 = argv[optind++];
                 std::string filename2 = argv[optind++];
-            
+
                 pReader1 = new SeqReader(filename1, SRF_NO_VALIDATION);
                 pReader2 = new SeqReader(filename2, SRF_NO_VALIDATION);
 
@@ -242,7 +252,7 @@ int preprocessMain(int argc, char** argv)
                 // If the names of the records are the same, append a /1 and /2 to them
                 if(record1.id == record2.id)
                 {
-                    if(!opt::suffix.empty()) 
+                    if(!opt::suffix.empty())
                     {
                         record1.id.append(opt::suffix);
                         record2.id.append(opt::suffix);
@@ -298,8 +308,8 @@ int preprocessMain(int argc, char** argv)
     std::cerr << "Reads kept:\t" << s_numReadsKept << " (" << (double)s_numReadsKept / (double)s_numReadsRead << ")\n";
     std::cerr << "Reads failed primer screen:\t" << s_numReadsPrimer << " (" << (double)s_numReadsPrimer / (double)s_numReadsRead << ")\n";
     std::cerr << "Bases parsed:\t" << s_numBasesRead << "\n";
-    std::cerr << "Bases kept:\t" << s_numBasesKept << " (" << (double)s_numBasesKept / (double)s_numBasesRead << ")\n"; 
-    std::cerr << "Number of incorrectly paired reads that were discarded: " << s_numInvalidPE << "\n"; 
+    std::cerr << "Bases kept:\t" << s_numBasesKept << " (" << (double)s_numBasesKept / (double)s_numBasesRead << ")\n";
+    std::cerr << "Number of incorrectly paired reads that were discarded: " << s_numInvalidPE << "\n";
     if(opt::bDustFilter)
         std::cerr << "Number of reads failed dust filter: " << s_numFailedDust << "\n";
     delete pTimer;
@@ -394,14 +404,14 @@ bool processRead(SeqRecord& record)
     {
         double dustScore = calculateDustScore(seqStr);
         bool bAcceptDust = dustScore < opt::dustThreshold;
-        
+
         if(!bAcceptDust)
         {
             s_numFailedDust += 1;
             if(opt::verbose >= 1)
             {
-                printf("Failed dust: %s %s %lf\n", record.id.c_str(), 
-                                                   seqStr.c_str(), 
+                printf("Failed dust: %s %s %lf\n", record.id.c_str(),
+                                                   seqStr.c_str(),
                                                    dustScore);
             }
             return false;
@@ -427,10 +437,32 @@ bool processRead(SeqRecord& record)
     record.seq = seqStr;
     record.qual = qualStr;
 
-
+    // At this point we have a read that has passed almost all the filters,
+    // let's remove the adapter if the user has requested so.
+    if(opt::adapter.length())
+    {
+      if (opt::adapter.length() - record.seq.length() < opt::minLength)
+      {
+        std::cerr << "Breaking min read length constrain when removing adapter\n";
+        exit(EXIT_FAILURE);
+      }
+      else
+      {
+        std::string _tmp(record.seq.toString());
+        size_t found = _tmp.find(opt::adapter);
+        if (found != std::string::npos) // Try the RC
+          found = _tmp.find(opt::adapterRC);
+        if (found != std::string::npos)
+        {
+          _tmp.erase(found, _tmp.length());
+          record.seq = _tmp;
+        }
+      }
+    }
 
     if(record.seq.length() == 0 || record.seq.length() < opt::minLength)
         return false;
+
     return true;
 }
 
@@ -439,12 +471,12 @@ bool samplePass()
 {
     if(opt::sampleFreq >= 1.0f)
         return true; // no sampling
-    
+
     double r = rand() / (RAND_MAX + 1.0f);
     return r < opt::sampleFreq;
 }
 
-// Perform a soft-clipping of the sequence by removing low quality bases from the 
+// Perform a soft-clipping of the sequence by removing low quality bases from the
 // 3' end using Heng Li's algorithm from bwa
 void softClip(int qualTrim, std::string& seq, std::string& qual)
 {
@@ -505,16 +537,16 @@ double calcGC(const std::string& seq)
     return num_gc / num_total;
 }
 
-// 
+//
 // Handle command line arguments
 //
 void parsePreprocessOptions(int argc, char** argv)
 {
     bool die = false;
-    for (char c; (c = getopt_long(argc, argv, shortopts, longopts, NULL)) != -1;) 
+    for (char c; (c = getopt_long(argc, argv, shortopts, longopts, NULL)) != -1;)
     {
         std::istringstream arg(optarg != NULL ? optarg : "");
-        switch (c) 
+        switch (c)
         {
             case 'o': arg >> opt::outFile; break;
             case 'q': arg >> opt::qualityTrim; break;
@@ -542,13 +574,13 @@ void parsePreprocessOptions(int argc, char** argv)
         }
     }
 
-    if (argc - optind < 1) 
+    if (argc - optind < 1)
     {
         std::cerr << SUBPROGRAM ": missing arguments\n";
         die = true;
-    } 
+    }
 
-    if (die) 
+    if (die)
     {
         std::cerr << "Try `" << SUBPROGRAM << " --help' for more information.\n";
         exit(EXIT_FAILURE);
