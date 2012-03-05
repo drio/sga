@@ -99,7 +99,7 @@ namespace opt
     static std::string adapterRC;
 }
 
-static const char* shortopts = "o:q:m:h:p:s:f:vi";
+static const char* shortopts = "o:q:m:h:p:r:s:f:vi";
 
 enum { OPT_HELP = 1, OPT_VERSION, OPT_PERMUTE, OPT_QSCALE, OPT_MINGC, OPT_MAXGC, OPT_DUST, OPT_DUST_THRESHOLD, OPT_SUFFIX, OPT_PHRED64 };
 
