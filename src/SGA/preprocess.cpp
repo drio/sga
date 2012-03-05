@@ -149,9 +149,6 @@ int preprocessMain(int argc, char** argv)
     else
         std::cerr << "QualFilter: no filtering\n";
 
-    if(opt::adapter.length())
-      opt::adapterRC = reverseComplement(opt::adapter);
-
     std::cerr << "HardClip: " << opt::hardClip << "\n";
     std::cerr << "Min length: " << opt::minLength << "\n";
     std::cerr << "Sample freq: " << opt::sampleFreq << "\n";
@@ -555,6 +552,7 @@ void parsePreprocessOptions(int argc, char** argv)
             case 'm': arg >> opt::minLength; break;
             case 'h': arg >> opt::hardClip; break;
             case 'p': arg >> opt::peMode; break;
+            case 'r': arg >> opt::adapter; reverseComplement(opt::adapter); break;
             case 's': arg >> opt::sampleFreq; break;
             case '?': die = true; break;
             case 'v': opt::verbose++; break;
