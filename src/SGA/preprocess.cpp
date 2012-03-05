@@ -49,7 +49,8 @@ static const char *PREPROCESS_USAGE_MESSAGE =
 "      -f, --quality-filter=INT         discard the read if it contains more than INT low-quality bases.\n"
 "                                       Bases with phred score <= 3 are considered low quality. Default: no filtering.\n"
 "                                       The filtering is applied after trimming so bases removed are not counted.\n"
-"      -r, --remove-adapter=STRING      Remove the adapter STRING from input reads.\n"
+"      -r, --remove-adapter-fwd=STRING\n"
+"      -c, --remove-adapter-rev=STRING  Remove the adapter STRING from input reads.\n"
 "                                       Do not use this option if you are planning to use the BCR algorithm for indexing.\n"
 "      -m, --min-length=INT             discard sequences that are shorter than INT\n"
 "                                       this is most useful when used in conjunction with --quality-trim. Default: 40\n"
@@ -95,10 +96,11 @@ namespace opt
     static double minGC = 0.0f;
     static double maxGC = 1.0;
     static bool bIlluminaScaling = false;
-    static std::string adapter;
+    static std::string adapter;  // adapter sequence forward
+    static std::string adapterR; // adapter sequence reverse
 }
 
-static const char* shortopts = "o:q:m:h:p:r:s:f:vi";
+static const char* shortopts = "o:q:m:h:p:r:c:s:f:vi";
 
 enum { OPT_HELP = 1, OPT_VERSION, OPT_PERMUTE, OPT_QSCALE, OPT_MINGC, OPT_MAXGC, OPT_DUST, OPT_DUST_THRESHOLD, OPT_SUFFIX, OPT_PHRED64 };
 
@@ -111,7 +113,8 @@ static const struct option longopts[] = {
     { "hard-clip",              required_argument, NULL, 'h' },
     { "min-length",             required_argument, NULL, 'm' },
     { "sample",                 required_argument, NULL, 's' },
-    { "remove-adapter",         required_argument, NULL, 'r' },
+    { "remove-adapter-fwd",     required_argument, NULL, 'r' },
+    { "remove-adapter-rev",     required_argument, NULL, 'c' },
     { "dust",                   no_argument,       NULL, OPT_DUST},
     { "dust-threshold",         required_argument, NULL, OPT_DUST_THRESHOLD },
     { "suffix",                 required_argument, NULL, OPT_SUFFIX },
@@ -162,8 +165,11 @@ int preprocessMain(int argc, char** argv)
         std::cerr << "Dust threshold: " << opt::dustThreshold << "\n";
     if(!opt::suffix.empty())
         std::cerr << "Suffix: " << opt::suffix << "\n";
-    if(opt::adapter.length())
-        std::cerr << "Adapter sequence: " << opt::adapter << "\n";
+    if(opt::adapter.length() && opt::adapterR.length())
+    {
+      std::cerr << "Adapter sequence fwd: " << opt::adapter << "\n";
+      std::cerr << "Adapter sequence rev: " << opt::adapterR << "\n";
+    }
 
     // Seed the RNG
     srand(time(NULL));
@@ -437,20 +443,22 @@ bool processRead(SeqRecord& record)
     // let's remove the adapter if the user has requested so.
     if(opt::adapter.length())
     {
-      if (opt::adapter.length() - record.seq.length() < opt::minLength)
-      {
-        std::cerr << "Breaking min read length constrain when removing adapter\n";
-        exit(EXIT_FAILURE);
-      }
+      std::string _tmp(record.seq.toString());
+      size_t found = _tmp.find(opt::adapter);
+      int _length;
+      if (found != std::string::npos) _length = opt::adapter.length();
       else
+      { // Couldn't find the fwd adapter
+        found   = _tmp.find(opt::adapterR);
+        _length = opt::adapterR.length();
+      }
+
+      if (found != std::string::npos) // found the adapter
       {
-        std::string _tmp(record.seq.toString());
-        size_t found = _tmp.find(opt::adapter);
-        if (found != std::string::npos)
-        {
-          _tmp.erase(found, opt::adapter.length());
-          record.seq = _tmp;
-        }
+        std::cout << "O: " << _tmp << std::endl;
+        _tmp.erase(found, _length);
+        record.seq = _tmp;
+        std::cout << "R: " << _tmp << std::endl;
       }
     }
 
@@ -550,6 +558,7 @@ void parsePreprocessOptions(int argc, char** argv)
             case 'h': arg >> opt::hardClip; break;
             case 'p': arg >> opt::peMode; break;
             case 'r': arg >> opt::adapter; break;
+            case 'c': arg >> opt::adapterR; break;
             case 's': arg >> opt::sampleFreq; break;
             case '?': die = true; break;
             case 'v': opt::verbose++; break;
@@ -602,6 +611,13 @@ void parsePreprocessOptions(int argc, char** argv)
     if(opt::qualityScale == QS_NONE && opt::qualityTrim > 0)
     {
         std::cerr << SUBPROGRAM ": If --quality-trim is specified, --quality-scale cannot be none\n";
+        exit(EXIT_FAILURE);
+    }
+
+    if( ( opt::adapter.length() && !opt::adapterR.length()) ||
+        (!opt::adapter.length() &&  opt::adapterR.length()) )
+    {
+        std::cerr << SUBPROGRAM ": Forward and Reverse sequence is necessary to perform adapter removal.\n";
         exit(EXIT_FAILURE);
     }
 }
