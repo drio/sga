@@ -322,6 +322,33 @@ int preprocessMain(int argc, char** argv)
 // returns true if the read should be kept
 bool processRead(SeqRecord& record)
 {
+    // let's remove the adapter if the user has requested so
+    // before doing any filtering
+    if(opt::adapter.length())
+    {
+      std::string _tmp(record.seq.toString());
+      size_t found = _tmp.find(opt::adapter);
+      int _length;
+
+      if (found != std::string::npos)
+        _length = opt::adapter.length();
+      else
+      { // Couldn't find the fwd adapter; Try the reverse version
+        found   = _tmp.find(opt::adapterR);
+        _length = opt::adapterR.length();
+      }
+
+      if (found != std::string::npos) // found the adapter
+      {
+        _tmp.erase(found, _length);
+        record.seq = _tmp;
+        // We have to remove the qualities of the adapter
+        _tmp = record.qual;
+        _tmp.erase(found, _length);
+        record.qual = _tmp;
+      }
+    }
+
     // Check if the sequence has uncalled bases
     std::string seqStr = record.seq.toString();
     std::string qualStr = record.qual;
@@ -439,28 +466,6 @@ bool processRead(SeqRecord& record)
     record.seq = seqStr;
     record.qual = qualStr;
 
-    // At this point we have a read that has passed almost all the filters,
-    // let's remove the adapter if the user has requested so.
-    if(opt::adapter.length())
-    {
-      std::string _tmp(record.seq.toString());
-      size_t found = _tmp.find(opt::adapter);
-      int _length;
-      if (found != std::string::npos) _length = opt::adapter.length();
-      else
-      { // Couldn't find the fwd adapter
-        found   = _tmp.find(opt::adapterR);
-        _length = opt::adapterR.length();
-      }
-
-      if (found != std::string::npos) // found the adapter
-      {
-        std::cout << "O: " << _tmp << std::endl;
-        _tmp.erase(found, _length);
-        record.seq = _tmp;
-        std::cout << "R: " << _tmp << std::endl;
-      }
-    }
 
     if(record.seq.length() == 0 || record.seq.length() < opt::minLength)
         return false;
